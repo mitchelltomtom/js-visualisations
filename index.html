@@ -3,33 +3,31 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Identity Resolution & Default Aggregation — Interactive Graph</title>
+  <title>Michael Bloggs — Identity Resolution (Master & Silos)</title>
   <style>
     :root {
-      --bg: #0f172a;           
-      --panel: #111827;        
-      --muted: #94a3b8;        
-      --text: #e5e7eb;         
-      --accent: #38bdf8;       
-      --brandA: #22c55e;       
-      --brandB: #f97316;       
-      --dupJur: #a78bfa;       
-      --dupBrand: #f43f5e;     
-      --orphan: #eab308;       
-      --link: #334155;         
+      --bg: #0f172a;           /* slate-900 */
+      --panel: #111827;        /* gray-900 */
+      --muted: #94a3b8;        /* slate-400 */
+      --text: #e5e7eb;         /* gray-200 */
+      --accent: #38bdf8;       /* sky-400 */
+      --brandA: #22c55e;       /* green-500 */
+      --brandB: #f97316;       /* orange-500 */
+      --dupLink: #a78bfa;      /* violet-400 */
+      --link: #334155;         /* slate-700 */
+      --default: #ef4444;      /* red-500 */
+      --ok: #22d3ee;           /* cyan-400 */
     }
     html, body {
       margin: 0; padding: 0; height: 100%; background: var(--bg); color: var(--text);
-      font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial;
+      font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial, "Apple Color Emoji","Segoe UI Emoji";
     }
     .app { display: grid; grid-template-rows: auto 1fr auto; height: 100%; }
     header {
-      padding: .75rem 1rem;
-      display:flex; gap: .75rem; align-items: center; flex-wrap: wrap;
-      border-bottom: 1px solid #1f2937;
-      background: linear-gradient(180deg, rgba(255,255,255,0.04), rgba(0,0,0,0));
+      padding: .75rem 1rem; display:flex; gap:.75rem; align-items:center; flex-wrap: wrap;
+      border-bottom: 1px solid #1f2937; background: linear-gradient(180deg, rgba(255,255,255,0.04), rgba(0,0,0,0));
     }
-    header h1 { font-size: 1rem; margin: 0; font-weight: 600; }
+    header h1 { font-size: 1rem; margin: 0; letter-spacing:.2px; font-weight: 600; }
     .controls { display:flex; gap:.5rem; flex-wrap: wrap; align-items:center; }
     .control {
       background: var(--panel); color: var(--text); border: 1px solid #1f2937;
@@ -49,9 +47,8 @@
     .dup-link { stroke-dasharray: 4 3; stroke-width: 1.5px; pointer-events: none; }
     .node circle { stroke: #0b1220; stroke-width: 1px; }
     .node text {
-      fill: var(--text); font-size: .8rem; text-anchor: middle;
-      pointer-events: none; paint-order: stroke;
-      stroke: #0b1220; stroke-width: 3px; stroke-linejoin: round;
+      fill: var(--text); font-size: .8rem; text-anchor: middle; pointer-events: none;
+      paint-order: stroke; stroke: #0b1220; stroke-width: 3px; stroke-linejoin: round;
     }
     .badge {
       position: fixed; right: .75rem; bottom: .75rem; font-size: .8rem;
@@ -69,31 +66,52 @@
 <body>
 <div class="app">
   <header>
-    <h1>Identity Resolution & Default Aggregation</h1>
+    <h1>Identity Resolution — Michael Bloggs (Master & Silo Profiles)</h1>
     <div class="controls">
-      <label class="control"><input id="toggle-dup-jur" type="checkbox" checked /> Cross-jurisdiction</label>
-      <label class="control"><input id="toggle-dup-brand" type="checkbox" checked /> Cross-brand</label>
-      <label class="control"><input id="toggle-orphan" type="checkbox" checked /> Orphans</label>
-      <button id="expand-all" class="btn">Expand</button>
-      <button id="collapse-all" class="btn">Collapse</button>
+      <label class="control"><input id="toggle-dup" type="checkbox" checked /> Show inferred silo-to-silo links</label>
+      <button id="expand-all" class="btn">Expand all</button>
+      <button id="collapse-all" class="btn">Collapse all</button>
       <button id="reset" class="btn">Reset view</button>
+    </div>
+    <div class="legend">
+      <span class="key"><i class="swatch" style="background:var(--brandA)"></i>Brand A</span>
+      <span class="key"><i class="swatch" style="background:var(--brandB)"></i>Brand B</span>
+      <span class="key"><i class="swatch" style="background:var(--dupLink)"></i>Inferred match (silo↔silo)</span>
+      <span class="key"><i class="swatch" style="background:var(--ok)"></i>Performing acct</span>
+      <span class="key"><i class="swatch" style="background:var(--default)"></i>Defaulted acct</span>
     </div>
   </header>
   <div class="panel">
-    <svg id="viz" role="img"></svg>
+    <svg id="viz" role="img" aria-label="Interactive graph: Michael Bloggs master profile connecting silo profiles and accounts"></svg>
     <div id="tooltip" class="tooltip" style="opacity:0"></div>
   </div>
-  <footer>Drag nodes. Tap to collapse/expand. Pinch/scroll to zoom. Dashed links = duplicates.</footer>
+  <footer>Drag nodes. Tap a node to collapse/expand. Pinch/scroll to zoom. Node size = cumulative balance. Dashed arcs = inferred duplicate links between silos.</footer>
 </div>
 <div class="badge">Mobile-friendly</div>
 
 <script src="https://cdn.jsdelivr.net/npm/d3@7"></script>
 <script>
-// ------- Sample hierarchical data -------
-// Group -> Brands -> Jurisdictions -> Profiles -> Accounts
+/* ------------------ DATA: One customer across silos ------------------ */
+// Helper creators
+function acct(id, balance, grade, status, dpd){
+  return { name: id, type: "account", balance, creditGrade: grade, defaultStatus: status, dpd };
+}
+function profileNode(label, meta, accounts){
+  return { name: label, type: "profile", ...meta, children: accounts };
+}
+
+// Master profile (created by bank after linking)
 const data = {
-  name: "Group",
-  type: "group",
+  name: "Master: Michael Bloggs (MCID-0001)",
+  type: "master",
+  attributes: {
+    name: "Michael Bloggs",
+    // Union/“best of” after resolution:
+    address: "12 Oak Road, Dublin, D14",
+    mobile: "+353 87 123 4567",
+    landline: "+353 1 234 5678",
+    pps: "1234567A", // present thanks to Brand A ROI
+  },
   children: [
     {
       name: "Brand A",
@@ -101,38 +119,61 @@ const data = {
       brand: "A",
       children: [
         {
-          name: "Ireland",
+          name: "ROI",
           type: "jurisdiction",
-          jurisdiction: "IE",
+          jurisdiction: "ROI",
           children: [
-            profile("C-1001", {brand:"A", jurisdiction:"IE", orphan:false, dup_same_brand_cross_jur:true, dup_cross_brand:false},
-              [acct(8200, "A", "performing", 0), acct(1200, "BBB", "performing", 12)]),
-            profile("C-1002", {brand:"A", jurisdiction:"IE", orphan:true},
-              [acct(450, "B", "default", 120)]),
-            profile("C-1003", {brand:"A", jurisdiction:"IE", dup_cross_brand:true},
-              [acct(3000, "A", "performing", 0)])
+            profileNode("A-ROI-Michael Bloggs", {
+              brand: "A", jurisdiction: "ROI",
+              attributes: {
+                name: "Michael Bloggs",
+                address: "12 Oak Road, Dublin 14",
+                mobile: "+353871234567",
+                landline: "+35312345678",
+                pps: "1234567A" // PPS collected only here
+              }
+            }, [
+              acct("Acct A-ROI-001", 8200, "A", "performing", 0),
+              acct("Acct A-ROI-002", 1200, "BBB", "performing", 12)
+            ])
           ]
         },
         {
-          name: "UK",
+          name: "NI",
           type: "jurisdiction",
-          jurisdiction: "UK",
+          jurisdiction: "NI",
           children: [
-            profile("C-1001-dup", {brand:"A", jurisdiction:"UK", dup_same_brand_cross_jur:true, canonical:"C-1001"},
-              [acct(2600, "BBB", "performing", 5)]),
-            profile("C-1100", {brand:"A", jurisdiction:"UK"},
-              [acct(900, "CCC", "performing", 18)])
+            profileNode("A-NI-M Bloggs", {
+              brand: "A", jurisdiction: "NI",
+              attributes: {
+                name: "M. Bloggs",
+                address: "12 Oak Rd, Belfast BT1",
+                mobile: "+44 7700 900123",
+                landline: null,
+                pps: null
+              }
+            }, [
+              acct("Acct A-NI-001", 2600, "BBB", "performing", 5)
+            ])
           ]
         },
         {
-          name: "Spain",
+          name: "GB",
           type: "jurisdiction",
-          jurisdiction: "ES",
+          jurisdiction: "GB",
           children: [
-            profile("C-1200", {brand:"A", jurisdiction:"ES"},
-              [acct(1500, "A", "performing", 0)]),
-            profile("C-1300", {brand:"A", jurisdiction:"ES", orphan:true},
-              [acct(300, "B", "default", 95)])
+            profileNode("A-GB-Mike Bloggs", {
+              brand: "A", jurisdiction: "GB",
+              attributes: {
+                name: "Mike Bloggs",
+                address: "12 Oak Road, London",
+                mobile: null,
+                landline: "+44 20 7946 0000",
+                pps: null
+              }
+            }, [
+              acct("Acct A-GB-001", 1500, "A", "performing", 0)
+            ])
           ]
         }
       ]
@@ -143,14 +184,23 @@ const data = {
       brand: "B",
       children: [
         {
-          name: "Ireland",
+          name: "ROI",
           type: "jurisdiction",
-          jurisdiction: "IE",
+          jurisdiction: "ROI",
           children: [
-            profile("C-1003-dup", {brand:"B", jurisdiction:"IE", dup_cross_brand:true, canonical:"C-1003"},
-              [acct(7000, "A", "performing", 0)]),
-            profile("C-2000", {brand:"B", jurisdiction:"IE", orphan:true},
-              [acct(120, "CCC", "default", 180)])
+            profileNode("B-ROI-Michael J Bloggs", {
+              brand: "B", jurisdiction: "ROI",
+              attributes: {
+                name: "Michael J Bloggs",
+                address: "12 Oak Rd, D14",
+                mobile: "+353 (87) 123-4567",
+                landline: null,
+                pps: null
+              }
+            }, [
+              acct("Acct B-ROI-001", 7000, "A", "performing", 0),
+              acct("Acct B-ROI-002", 120, "CCC", "default", 180)
+            ])
           ]
         }
       ]
@@ -158,171 +208,237 @@ const data = {
   ]
 };
 
-function acct(balance, creditGrade, status, dpd){
-  return { name: "Acct " + Math.random().toString(36).slice(2,6).toUpperCase(),
-    type:"account", balance, creditGrade, defaultStatus:status, dpd };
-}
-function profile(id, flags, accounts){
-  return { name:id, id, type:"profile", orphan:false, dup_same_brand_cross_jur:false, dup_cross_brand:false,
-    ...flags, children:accounts };
-}
-
-// Duplicate relationships
-const dupLinks = [
-  { sourceId: "C-1001", targetId: "C-1001-dup", type: "cross-jurisdiction" },
-  { sourceId: "C-1003", targetId: "C-1003-dup", type: "cross-brand" }
+// Non-hierarchical “inferred duplicate” links between silo profiles (dashed arcs)
+const inferredSiloLinks = [
+  // A.ROI ↔ A.NI (name/phone/address similarity)
+  { sourceLabel: "A-ROI-Michael Bloggs", targetLabel: "A-NI-M Bloggs", reason: "Name/Address/Mobile similarity", type: "inferred" },
+  // A.ROI ↔ A.GB
+  { sourceLabel: "A-ROI-Michael Bloggs", targetLabel: "A-GB-Mike Bloggs", reason: "Name/Address similarity", type: "inferred" },
+  // A.ROI ↔ B.ROI (cross-brand)
+  { sourceLabel: "A-ROI-Michael Bloggs", targetLabel: "B-ROI-Michael J Bloggs", reason: "Name/Address/Mobile similarity", type: "inferred" },
+  // A.NI ↔ A.GB (brand, cross-jurisdiction)
+  { sourceLabel: "A-NI-M Bloggs", targetLabel: "A-GB-Mike Bloggs", reason: "Name similarity", type: "inferred" }
 ];
 
-// Compute balances
+/* ------------------ Balance aggregation + collapse helpers ------------------ */
 function computeCumulativeBalance(node){
-  if(node.type === "account"){ node.cumBalance = node.balance; return node.balance; }
-  let sum = 0; (node.children||[]).forEach(c => sum+=computeCumulativeBalance(c));
-  node.cumBalance = sum; return sum;
+  if(node.type === "account"){ node.cumBalance = node.balance; return node.cumBalance; }
+  let sum = 0;
+  (node.children || []).forEach(c => sum += computeCumulativeBalance(c));
+  node.cumBalance = sum;
+  return sum;
 }
 computeCumulativeBalance(data);
 
-// collapse helper
-function collapseAll(d){ if(d.children){ d._children=d.children; d.children.forEach(collapseAll); d.children=null; } }
-function expandAll(d){ if(d._children){ d.children=d._children; d._children=null; } (d.children||[]).forEach(expandAll); }
-data.children.forEach(b => b.children.forEach(j => collapseAll(j))); // collapse jurisdictions initially
-
-// flatten visible tree
-let nodeIdCounter=0;
-function flattenVisible(root){
-  const nodes=[], links=[];
-  function recurse(d, parent){
-    d.uid=++nodeIdCounter; nodes.push(d);
-    (d.children||[]).forEach(c => { links.push({source:d,target:c,type:"hier"}); recurse(c,d); });
+function collapseAll(d){
+  if(d.children){
+    d._children = d.children;
+    d._children.forEach(collapseAll);
+    d.children = null;
+  } else if(d._children){
+    d._children.forEach(collapseAll);
   }
-  recurse(root); return {nodes,links};
 }
-let {nodes,links}=flattenVisible(data);
+function expandAll(d){
+  if(d._children){ d.children = d._children; d._children = null; }
+  (d.children || []).forEach(expandAll);
+}
 
-// radius scale
-const radiusScale = d3.scaleSqrt().domain([1,data.cumBalance]).range([6,42]);
+// Collapse brands’ jurisdictions initially for a tidy start
+(data.children || []).forEach(b => (b.children || []).forEach(j => collapseAll(j)));
 
-// color function
+/* ------------------ Flatten visible tree ------------------ */
+let nodeIdCounter = 0;
+function flattenVisible(root){
+  const nodes = [];
+  const links = [];
+  nodeIdCounter = 0;
+  (function recurse(d, parent=null){
+    d.uid = ++nodeIdCounter;
+    nodes.push(d);
+    (d.children || []).forEach(c => {
+      links.push({ source: d, target: c, type: "hier" });
+      recurse(c, d);
+    });
+  })(root, null);
+  return { nodes, links };
+}
+let { nodes, links } = flattenVisible(data);
+
+/* ------------------ Scales & colors ------------------ */
+const maxBalance = data.cumBalance || 1;
+const radiusScale = d3.scaleSqrt().domain([1, maxBalance]).range([6, 44]);
+
 function nodeColor(d){
-  if(d.type==="brand") return d.brand==="A"?"var(--brandA)":"var(--brandB)";
-  if(d.type==="jurisdiction") return "#60a5fa";
-  if(d.type==="profile"){
-    if(d.dup_cross_brand) return "var(--dupBrand)";
-    if(d.dup_same_brand_cross_jur) return "var(--dupJur)";
-    if(d.orphan) return "var(--orphan)";
-    return "#38bdf8";
-  }
-  if(d.type==="account") return d.defaultStatus==="default"?"#ef4444":"#22d3ee";
+  if(d.type === "master") return "var(--accent)";
+  if(d.type === "brand") return d.brand === "A" ? "var(--brandA)" : "var(--brandB)";
+  if(d.type === "jurisdiction") return "#60a5fa"; // blue-ish
+  if(d.type === "profile") return d.brand === "A" ? "#34d399" : "#fb923c"; // brighter brand tint
+  if(d.type === "account") return d.defaultStatus === "default" ? "var(--default)" : "var(--ok)";
   return "var(--accent)";
 }
 
-// setup svg
-const svg=d3.select("#viz"), g=svg.append("g");
-const linkGroup=g.append("g"), dupGroup=g.append("g"), nodeGroup=g.append("g");
-const tooltip=d3.select("#tooltip");
-const width=window.innerWidth, height=window.innerHeight;
-
-const sim=d3.forceSimulation(nodes)
-  .force("link", d3.forceLink(links).id(d=>d.uid).distance(d=>50+(radiusScale(d.target.cumBalance)||10)).strength(.12))
-  .force("charge", d3.forceManyBody().strength(-120))
-  .force("collide", d3.forceCollide().radius(d=>(radiusScale(d.cumBalance)||8)+6).iterations(2))
-  .force("center", d3.forceCenter(width/2,height/2));
-
-// zoom
-svg.call(d3.zoom().scaleExtent([0.35,2.5]).on("zoom",ev=>g.attr("transform",ev.transform)));
-
-// render
-function render(){
-  const link=linkGroup.selectAll("line").data(links,d=>d.source.uid+"-"+d.target.uid);
-  link.enter().append("line").attr("class","link").merge(link);
-  link.exit().remove();
-
-  const idmap=new Map(nodes.filter(n=>n.type==="profile").map(n=>[n.name,n]));
-  const showJur=document.getElementById("toggle-dup-jur").checked;
-  const showBrand=document.getElementById("toggle-dup-brand").checked;
-  const visibleDup=dupLinks.map(l=>({...l,source:idmap.get(l.sourceId),target:idmap.get(l.targetId)}))
-    .filter(l=>l.source&&l.target)
-    .filter(l=>(l.type==="cross-jurisdiction"&&showJur)||(l.type==="cross-brand"&&showBrand));
-  const dup=dupGroup.selectAll("path").data(visibleDup,d=>d.source.uid+"~"+d.target.uid);
-  dup.enter().append("path").attr("class","dup-link").attr("fill","none")
-    .attr("stroke",d=>d.type==="cross-jurisdiction"?"var(--dupJur)":"var(--dupBrand)").merge(dup);
-  dup.exit().remove();
-
-  const node=nodeGroup.selectAll("g.node").data(nodes,d=>d.uid);
-  const nodeEnter=node.enter().append("g").attr("class","node")
-    .call(d3.drag().on("start",dragstarted).on("drag",dragged).on("end",dragended))
-    .on("click",(ev,d)=>{toggle(d); ev.stopPropagation();})
-    .on("mouseenter",(ev,d)=>showTooltip(ev,d))
-    .on("mousemove",(ev,d)=>moveTooltip(ev))
-    .on("mouseleave",hideTooltip);
-  nodeEnter.append("circle").attr("r",d=>Math.max(6,radiusScale(d.cumBalance)||6)).attr("fill",d=>nodeColor(d));
-  nodeEnter.append("text").attr("dy",d=>(radiusScale(d.cumBalance)||8)+12).text(d=>labelFor(d));
-  node.exit().remove();
-
-  sim.nodes(nodes).on("tick",()=>{
-    linkGroup.selectAll("line").attr("x1",d=>d.source.x).attr("y1",d=>d.source.y)
-      .attr("x2",d=>d.target.x).attr("y2",d=>d.target.y);
-    dupGroup.selectAll("path").attr("d",d=>{
-      const x1=d.source.x,y1=d.source.y,x2=d.target.x,y2=d.target.y;
-      const dx=x2-x1,dy=y2-y1,dr=Math.hypot(dx,dy)*0.8;
-      return `M${x1},${y1} A${dr},${dr} 0 0,1 ${x2},${y2}`;
-    });
-    nodeGroup.selectAll("g.node").attr("transform",d=>`translate(${d.x},${d.y})`);
-  });
-  sim.force("link").links(links);
-  sim.alpha(0.9).restart();
-}
-
 function labelFor(d){
-  if(d.type==="group") return "Group";
-  if(d.type==="brand") return "Brand "+d.brand;
-  if(d.type==="jurisdiction") return d.name;
-  if(d.type==="profile"){
-    let tags=[]; if(d.dup_cross_brand)tags.push("xBrand"); if(d.dup_same_brand_cross_jur)tags.push("xJur"); if(d.orphan)tags.push("Orphan");
-    return d.name+(tags.length?" · "+tags.join(","):"");
-  }
-  if(d.type==="account") return (d.defaultStatus==="default"?"⚠":"✓")+" €"+d.balance;
+  if(d.type === "master") return "MASTER: Michael Bloggs";
+  if(d.type === "brand") return `Brand ${d.brand}`;
+  if(d.type === "jurisdiction") return d.name;
+  if(d.type === "profile") return d.name;
+  if(d.type === "account") return `${d.defaultStatus === "default" ? "⚠" : "✓"} €${d.balance.toLocaleString()}`;
   return d.name;
 }
 
-function toggle(d){ if(d.children){ d._children=d.children; d.children=null; }
-  else if(d._children){ d.children=d._children; d._children=null; }
-  const f=flattenVisible(data); nodes=f.nodes; links=f.links; render(); }
+/* ------------------ SVG + Simulation ------------------ */
+const svg = d3.select("#viz");
+const g = svg.append("g");
+const linkGroup = g.append("g").attr("class", "links");
+const dupGroup = g.append("g").attr("class", "dup-links");
+const nodeGroup = g.append("g").attr("class", "nodes");
+const tooltip = d3.select("#tooltip");
+const width = svg.node().clientWidth, height = svg.node().clientHeight;
 
-function dragstarted(ev,d){ if(!ev.active) sim.alphaTarget(.3).restart(); d.fx=d.x; d.fy=d.y; }
-function dragged(ev,d){ d.fx=ev.x; d.fy=ev.y; }
-function dragended(ev,d){ if(!ev.active) sim.alphaTarget(0); }
+const simulation = d3.forceSimulation(nodes)
+  .force("link", d3.forceLink(links).id(d => d.uid).distance(d => 60 + (radiusScale(d.target.cumBalance)||10)).strength(0.12))
+  .force("charge", d3.forceManyBody().strength(-140))
+  .force("collide", d3.forceCollide().radius(d => (radiusScale(d.cumBalance)||8) + 6).iterations(2))
+  .force("center", d3.forceCenter(width/2, height/2));
 
-function showTooltip(ev,d){
-  let html=`<b>${labelFor(d)}</b><br><b>Type:</b> ${d.type}`;
-  if(d.type!=="account") html+=`<br><b>Cumulative Balance:</b> €${d.cumBalance}`;
-  if(d.type==="profile"){
-    if(d.orphan) html+="<br>Orphan: Yes";
-    if(d.dup_cross_brand) html+="<br>Cross-Brand Duplicate";
-    if(d.dup_same_brand_cross_jur) html+="<br>Cross-Jurisdiction Duplicate";
-  }
-  if(d.type==="account"){
-    html+=`<br>Credit Grade: ${d.creditGrade}`;
-    html+=`<br>Status: ${d.defaultStatus}`;
-    html+=`<br>Days Past Due: ${d.dpd}`;
-  }
-  tooltip.style("opacity",1).html(html);
-  moveTooltip(ev);
+const zoom = d3.zoom().scaleExtent([0.35, 2.5]).on("zoom", ev => g.attr("transform", ev.transform));
+svg.call(zoom);
+
+/* ------------------ Render ------------------ */
+function render(){
+  // Hierarchical links
+  const link = linkGroup.selectAll("line.link").data(links, d => d.source.uid + "-" + d.target.uid);
+  link.enter().append("line").attr("class","link")
+      .attr("stroke-width", d => 1 + Math.min(3, Math.log10((d.target.cumBalance||0)+1)))
+    .merge(link);
+  link.exit().remove();
+
+  // Inferred silo-to-silo arcs (toggle)
+  const showDup = document.getElementById("toggle-dup").checked;
+  const idmap = new Map(nodes.filter(n => n.type === "profile").map(n => [n.name, n]));
+  const dupVisible = (showDup ? inferredSiloLinks : [])
+    .map(l => ({...l, source: idmap.get(l.sourceLabel), target: idmap.get(l.targetLabel)}))
+    .filter(l => l.source && l.target);
+
+  const dup = dupGroup.selectAll("path.dup-link").data(dupVisible, d => d.source.uid + "~" + d.target.uid);
+  dup.enter().append("path")
+      .attr("class","dup-link")
+      .attr("fill","none")
+      .attr("stroke","var(--dupLink)")
+      .attr("stroke-width", 2)
+    .merge(dup);
+  dup.exit().remove();
+
+  // Nodes
+  const node = nodeGroup.selectAll("g.node").data(nodes, d => d.uid);
+  const nodeEnter = node.enter().append("g")
+    .attr("class","node")
+    .call(d3.drag().on("start", dragstarted).on("drag", dragged).on("end", dragended))
+    .on("click", (event, d) => { toggle(d); event.stopPropagation(); })
+    .on("pointerenter", (event, d) => showTooltip(event, d))
+    .on("pointermove", (event, d) => moveTooltip(event))
+    .on("pointerleave", hideTooltip);
+
+  nodeEnter.append("circle")
+    .attr("r", d => Math.max(6, radiusScale(d.cumBalance)||6))
+    .attr("fill", d => nodeColor(d));
+
+  nodeEnter.append("text")
+    .attr("dy", d => (radiusScale(d.cumBalance)||8) + 12)
+    .text(d => labelFor(d));
+
+  node.exit().remove();
+
+  // Simulation tick
+  simulation.nodes(nodes).on("tick", () => {
+    linkGroup.selectAll("line.link")
+      .attr("x1", d => d.source.x).attr("y1", d => d.source.y)
+      .attr("x2", d => d.target.x).attr("y2", d => d.target.y);
+
+    dupGroup.selectAll("path.dup-link")
+      .attr("d", d => {
+        const x1 = d.source.x, y1 = d.source.y;
+        const x2 = d.target.x, y2 = d.target.y;
+        const dx = x2 - x1, dy = y2 - y1;
+        const dr = Math.hypot(dx, dy) * 0.8;
+        return `M${x1},${y1} A${dr},${dr} 0 0,1 ${x2},${y2}`;
+      });
+
+    nodeGroup.selectAll("g.node").attr("transform", d => `translate(${d.x},${d.y})`);
+  });
+  simulation.force("link").links(links);
+  simulation.alpha(0.9).restart();
 }
-function moveTooltip(ev){ const pad=12; const bbox=tooltip.node().getBoundingClientRect();
-  let x=ev.clientX+pad,y=ev.clientY+pad;
-  if(x+bbox.width>window.innerWidth) x=ev.clientX-bbox.width-pad;
-  if(y+bbox.height>window.innerHeight) y=ev.clientY-bbox.height-pad;
-  tooltip.style("left",x+"px").style("top",y+"px"); }
-function hideTooltip(){ tooltip.style("opacity",0); }
 
-document.getElementById("expand-all").onclick=()=>{expandAll(data); const f=flattenVisible(data); nodes=f.nodes; links=f.links; render();};
-document.getElementById("collapse-all").onclick=()=>{data.children.forEach(b=>b.children.forEach(j=>collapseAll(j))); const f=flattenVisible(data); nodes=f.nodes; links=f.links; render();};
-document.getElementById("reset").onclick=()=>{svg.transition().duration(400).call(d3.zoom().transform,d3.zoomIdentity);};
-document.getElementById("toggle-dup-jur").onchange=render;
-document.getElementById("toggle-dup-brand").onchange=render;
-document.getElementById("toggle-orphan").onchange=render;
+/* ------------------ Tooltip ------------------ */
+function showTooltip(event, d){
+  let html = `<b>${labelFor(d)}</b><br><b>Type:</b> ${d.type}`;
+  if(d.type !== "account") html += `<br><b>Cumulative Balance:</b> €${(d.cumBalance||0).toLocaleString()}`;
+  if(d.type === "master"){
+    const a = d.attributes || {};
+    html += `<br><br><b>Resolved Attributes</b>`;
+    html += `<br>Name: ${a.name || "—"}`;
+    html += `<br>Address: ${a.address || "—"}`;
+    html += `<br>Mobile: ${a.mobile || "—"}`;
+    html += `<br>Landline: ${a.landline || "—"}`;
+    html += `<br>PPS: ${a.pps || "—"}`;
+  }
+  if(d.type === "profile"){
+    const a = (d.attributes || {});
+    html += `<br><br><b>Captured Attributes</b>`;
+    html += `<br>Name: ${a.name ?? "—"}`;
+    html += `<br>Address: ${a.address ?? "—"}`;
+    html += `<br>Mobile: ${a.mobile ?? "—"}`;
+    html += `<br>Landline: ${a.landline ?? "—"}`;
+    html += `<br>PPS: ${a.pps ?? "—"}`;
+  }
+  if(d.type === "account"){
+    html += `<br><b>Balance:</b> €${d.balance.toLocaleString()}`;
+    html += `<br><b>Credit Grade:</b> ${d.creditGrade}`;
+    html += `<br><b>Status:</b> ${d.defaultStatus}`;
+    html += `<br><b>Days Past Due:</b> ${d.dpd}`;
+  }
+  tooltip.style("opacity", 1).html(html);
+  moveTooltip(event);
+}
+function moveTooltip(event){
+  const pad = 12, vw = window.innerWidth, vh = window.innerHeight;
+  const bbox = tooltip.node().getBoundingClientRect();
+  let x = event.clientX + pad, y = event.clientY + pad;
+  if(x + bbox.width > vw) x = event.clientX - bbox.width - pad;
+  if(y + bbox.height > vh) y = event.clientY - bbox.height - pad;
+  tooltip.style("left", x + "px").style("top", y + "px");
+}
+function hideTooltip(){ tooltip.style("opacity", 0); }
 
-// initial render
+/* ------------------ Interactions ------------------ */
+function toggle(d){
+  if(d.children){ d._children = d.children; d.children = null; }
+  else if(d._children){ d.children = d._children; d._children = null; }
+  const f = flattenVisible(data); nodes = f.nodes; links = f.links; render();
+}
+function dragstarted(event, d){
+  if(!event.active) simulation.alphaTarget(0.3).restart();
+  d.fx = d.x; d.fy = d.y;
+}
+function dragged(event, d){ d.fx = event.x; d.fy = event.y; }
+function dragended(event, d){ if(!event.active) simulation.alphaTarget(0); }
+
+/* ------------------ Controls ------------------ */
+document.getElementById("expand-all").addEventListener("click", () => {
+  expandAll(data); const f = flattenVisible(data); nodes = f.nodes; links = f.links; render();
+});
+document.getElementById("collapse-all").addEventListener("click", () => {
+  (data.children || []).forEach(b => (b.children || []).forEach(j => collapseAll(j)));
+  const f = flattenVisible(data); nodes = f.nodes; links = f.links; render();
+});
+document.getElementById("reset").addEventListener("click", () => {
+  svg.transition().duration(400).call(zoom.transform, d3.zoomIdentity);
+});
+document.getElementById("toggle-dup").addEventListener("change", render);
+
+/* ------------------ Initial render ------------------ */
 render();
 </script>
 </body>
