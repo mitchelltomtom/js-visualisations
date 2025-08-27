@@ -31,7 +31,7 @@
   .panel{position:relative;isolation:isolate}
   svg{width:100%;height:100%;display:block}
   .link{fill:none;stroke:#334155;stroke-opacity:.6;stroke-width:1.5px}
-  .dup-link{fill:none;stroke:var(--dup);stroke-width:2px;stroke-dasharray:4 3}
+  .dup-link{fill:none;stroke:var(--dup);stroke-width:2px;stroke-dasharray:4 3;pointer-events:none}
   .node circle{fill:#0e1729;stroke:#0b1220;stroke-width:1px}
   .node-label{
     font-size:.86rem; fill:var(--text); dominant-baseline:middle;
@@ -80,7 +80,7 @@
     <div id="tooltip" class="tooltip"></div>
   </div>
 
-  <footer>Tap labels to expand/collapse. Root starts on the left. Node size ≈ cumulative balance. Dashed arcs show inferred duplicates between silo profiles.</footer>
+  <footer>Tap labels to expand/collapse. Root on the left. Node size ≈ cumulative balance. Dashed arcs show inferred duplicates between silo profiles.</footer>
 </div>
 <div class="badge">Mobile-friendly</div>
 
@@ -134,83 +134,105 @@ const data = {
     ]}
   ]
 };
-// Inferred duplicate (silo↔silo) links by profile label
+// Inferred duplicate (silo↔silo) links by profile label (drawn as dashed arcs)
 const inferred = [
-  {s:"A-ROI-Michael Bloggs", t:"A-NI-M Bloggs", why:"Name/Address/Mobile similar"},
-  {s:"A-ROI-Michael Bloggs", t:"A-GB-Mike Bloggs", why:"Name/Address similar"},
-  {s:"A-ROI-Michael Bloggs", t:"B-ROI-Michael J Bloggs", why:"Name/Address/Mobile similar"},
-  {s:"A-NI-M Bloggs",       t:"A-GB-Mike Bloggs",       why:"Name similar"}
+  {s:"A-ROI-Michael Bloggs", t:"A-NI-M Bloggs"},
+  {s:"A-ROI-Michael Bloggs", t:"A-GB-Mike Bloggs"},
+  {s:"A-ROI-Michael Bloggs", t:"B-ROI-Michael J Bloggs"},
+  {s:"A-NI-M Bloggs",       t:"A-GB-Mike Bloggs"}
 ];
 
-/* ------------------ Helpers ------------------ */
+/* ------------------ Balances & collapse helpers ------------------ */
 function cumBalance(n){
   if(n.type==="account"){ n.cumBalance=n.balance; return n.cumBalance; }
   let s=0; (n.children||[]).forEach(c=>s+=cumBalance(c));
   n.cumBalance=s; return s;
 }
 cumBalance(data);
-function collapseAll(d){ if(d.children){ d._children=d.children; d._children.forEach(collapseAll); d.children=null; } }
-function expandAll(d){ if(d._children){ d.children=d._children; d._children=null; } (d.children||[]).forEach(expandAll); }
-// Start with jurisdictions collapsed for compactness
-(data.children||[]).forEach(b => (b.children||[]).forEach(j => collapseAll(j)));
 
-/* ------------------ Layout ------------------ */
+function collapseAll(hnode){
+  if(hnode.children){
+    hnode._children = hnode.children;
+    hnode._children.forEach(collapseAll);
+    hnode.children = null;
+  }
+}
+function expandAll(hnode){
+  if(hnode._children){ hnode.children = hnode._children; hnode._children = null; }
+  (hnode.children||[]).forEach(expandAll);
+}
+
+/* ------------------ Build hierarchy ------------------ */
+let root = d3.hierarchy(data);
+root.each(d => { d._id = d.data.name; }); // stable key
+root.x0 = 0; root.y0 = 0;
+
+// Start with jurisdictions collapsed under brands for readability
+(root.children||[]).forEach(b => (b.children||[]).forEach(j => collapseAll(j)));
+
+/* ------------------ Layout + SVG groups ------------------ */
 const svg = d3.select("#viz");
 const gLinks = svg.append("g");
 const gDup   = svg.append("g");
 const gNodes = svg.append("g");
 const tooltip = d3.select("#tooltip");
 
-const margin = {top: 24, right: 60, bottom: 24, left: 24};
-function availableSize(){
-  const w = svg.node().clientWidth || window.innerWidth;
-  const h = svg.node().clientHeight || window.innerHeight;
-  return [Math.max(320, w), Math.max(320, h)];
-}
-let [W,H] = availableSize();
-const dx = 56;                     // node vertical separation
-const dy = Math.max(120, W/10);    // node horizontal separation
-const treeLayout = d3.tree().nodeSize([dx, dy]);
+const dx = 56;          // vertical spacing
+const dyBase = 180;     // base horizontal spacing
+const tree = d3.tree().nodeSize([dx, dyBase]);
 
-let root = d3.hierarchy(data);
-root.x0 = H/2; root.y0 = 0;
+const diagonal = d3.linkHorizontal()
+  .x(d => d.y)
+  .y(d => d.x);
 
-/* ------------------ Update/Render ------------------ */
+/* ------------------ Render/update ------------------ */
 function update(source){
-  // Recompute cumulative balances (in case of dynamic edits later)
-  cumBalance(data);
-  // Compute layout
-  treeLayout(root);
+  // Layout
+  tree(root);
 
-  // Compute bounds for responsive viewBox
+  // Compute responsive viewBox bounds
   let left = Infinity, right = -Infinity, top = Infinity, bottom = -Infinity;
   root.each(d => {
-    if(d.x < top) top = d.x;
-    if(d.x > bottom) bottom = d.x;
-    if(d.y < left) left = d.y;
-    if(d.y > right) right = d.y;
+    if (d.x < top) top = d.x;
+    if (d.x > bottom) bottom = d.x;
+    if (d.y < left) left = d.y;
+    if (d.y > right) right = d.y;
   });
-  const width = right - left + margin.left + margin.right;
+  const margin = {top: 40, right: 80, bottom: 40, left: 40};
+  const width  = right - left + margin.left + margin.right;
   const height = bottom - top + margin.top + margin.bottom;
   svg.attr("viewBox", [left - margin.left, top - margin.top, width, height].join(" "));
 
   // LINKS
-  const links = root.links();
-  const link = gLinks.selectAll("path.link").data(links, d => d.target.data.name);
+  const link = gLinks.selectAll("path.link")
+    .data(root.links(), d => d.target.data.name);
+
   link.enter().append("path")
       .attr("class","link")
-      .attr("d", d => elbow(d))
+      .attr("d", d => {
+        const o = {x: source.x0 ?? source.x, y: source.y0 ?? source.y};
+        return diagonal({source: o, target: o});
+      })
     .merge(link)
       .transition().duration(350)
-      .attr("d", d => elbow(d));
-  link.exit().transition().duration(250).style("opacity",0).remove();
+      .attr("d", diagonal);
+
+  link.exit().transition().duration(250)
+      .attr("d", d => {
+        const o = {x: source.x ?? 0, y: source.y ?? 0};
+        return diagonal({source: o, target: o});
+      })
+      .remove();
 
   // NODES
   const nodes = root.descendants();
-  const node = gNodes.selectAll("g.node").data(nodes, d => d.data.name);
-  const nodeEnter = node.enter().append("g").attr("class","node")
-      .attr("transform", d => `translate(${source.y0},${source.x0})`)
-      .on("click", (ev,d)=>{toggle(d); update(d); ev.stopPropagation();})
+  const node = gNodes.selectAll("g.node")
+    .data(nodes, d => d._id);
+
+  const nodeEnter = node.enter().append("g")
+      .attr("class","node")
+      .attr("transform", d => `translate(${source.y0 ?? source.y},${source.x0 ?? source.x})`)
+      .on("click", (ev,d)=>{ toggle(d); update(d); ev.stopPropagation(); })
       .on("pointerenter",(ev,d)=>showTooltip(ev,d))
       .on("pointermove",(ev)=>moveTooltip(ev))
       .on("pointerleave", hideTooltip);
@@ -223,8 +245,8 @@ function update(source){
 
   nodeEnter.append("text")
     .attr("class","node-label")
-    .attr("x", d => d.children||d._children ? -10 : 10)
-    .attr("text-anchor", d => d.children||d._children ? "end" : "start")
+    .attr("x", d => (d.children||d._children) ? -10 : 10)
+    .attr("text-anchor", d => (d.children||d._children) ? "end" : "start")
     .attr("dy", "0")
     .text(d => labelFor(d));
 
@@ -233,33 +255,37 @@ function update(source){
     .attr("transform", d => `translate(${d.y},${d.x})`);
 
   node.exit().transition().duration(250)
-    .attr("transform", d => `translate(${source.y},${source.x})`)
+    .attr("transform", d => `translate(${source.y ?? 0},${source.x ?? 0})`)
     .style("opacity",0).remove();
 
-  // INFERRED CROSS-SILO ARCS (optional)
+  // INFERRED CROSS-SILO (dashed) LINKS
   drawInferred(nodes);
 
-  // Stash old positions for transition
+  // Stash positions for next transition
   root.each(d => { d.x0 = d.x; d.y0 = d.y; });
 }
 
-// Smooth horizontal elbow connector
-function elbow(d){
-  const x1 = d.source.x, y1 = d.source.y, x2 = d.target.x, y2 = d.target.y;
-  const mx = (y1 + y2) / 2;
-  return `M${y1},${x1} C${mx},${x1} ${mx},${x2} ${y2},${x2}`;
+// Toggle (hierarchy nodes, not raw data)
+function toggle(d){
+  if(d.children){ d._children = d.children; d.children = null; }
+  else if(d._children){ d.children = d._children; d._children = null; }
 }
 
-/* ------------------ Styling / Labels ------------------ */
+/* ------------------ Node visuals ------------------ */
 function radiusFor(d){
-  const t=d.data.type;
-  if(t==="master") return 14;
-  if(t==="account") return 6;
-  const c=d.data.cumBalance ?? 1;
+  if(d.data.type==="master") return 14;
+  if(d.data.type==="account") return 6;
+  // mild scaling by subtree balance for containers/profiles
+  const c = cumulative(d);
   return Math.max(7, Math.min(16, 6 + Math.log10((c||1)+1)*6));
 }
+function cumulative(d){
+  // cache on data for speed; recompute once at load (static example)
+  if(d.data.cumBalance != null) return d.data.cumBalance;
+  return 1;
+}
 function fillFor(d){
-  const t=d.data.type;
+  const t = d.data.type;
   if(t==="master") return "var(--accent)";
   if(t==="brand")  return d.data.brand==="A" ? "var(--brandA)" : "var(--brandB)";
   if(t==="jurisdiction") return "#60a5fa";
@@ -281,6 +307,7 @@ function labelFor(d){
 }
 
 /* ------------------ Tooltip ------------------ */
+const tooltipEl = d3.select("#tooltip");
 function showTooltip(ev,d){
   let html = `<b>${labelFor(d)}</b><br><b>Type:</b> ${d.data.type}`;
   if(d.data.type!=="account"){
@@ -310,40 +337,38 @@ function showTooltip(ev,d){
     html += `<br><b>Status:</b> ${d.data.defaultStatus}`;
     html += `<br><b>Days Past Due:</b> ${d.data.dpd}`;
   }
-  tooltip.html(html).style("opacity",1);
+  tooltipEl.html(html).style("opacity",1);
   moveTooltip(ev);
 }
 function moveTooltip(ev){
   const pad=12, vw=window.innerWidth, vh=window.innerHeight;
-  const box=tooltip.node().getBoundingClientRect();
+  const box=tooltipEl.node().getBoundingClientRect();
   let x=ev.clientX+pad, y=ev.clientY+pad;
   if(x+box.width>vw) x=ev.clientX-box.width-pad;
   if(y+box.height>vh) y=ev.clientY-box.height-pad;
-  tooltip.style("left",x+"px").style("top",y+"px");
+  tooltipEl.style("left",x+"px").style("top",y+"px");
 }
-function hideTooltip(){ tooltip.style("opacity",0); }
+function hideTooltip(){ tooltipEl.style("opacity",0); }
 
-/* ------------------ Inferred silo links ------------------ */
+/* ------------------ Inferred silo (dashed) links ------------------ */
 function drawInferred(nodes){
   gDup.selectAll("*").remove();
   if(!document.getElementById("toggle-dup").checked) return;
 
-  const map = new Map();
-  nodes.filter(n=>n.data.type==="profile").forEach(n=>map.set(n.data.name,{x:n.x,y:n.y}));
+  const index = new Map(nodes.filter(n=>n.data.type==="profile").map(n => [n.data.name, n]));
   inferred.forEach(({s,t})=>{
-    const a=map.get(s), b=map.get(t);
+    const a=index.get(s), b=index.get(t);
     if(!a||!b) return;
-    const path = `M${a.y},${a.x} C${(a.y+b.y)/2},${a.x} ${(a.y+b.y)/2},${b.x} ${b.y},${b.x}`;
-    gDup.append("path").attr("class","dup-link").attr("d",path)
+    const pathD = d3.linkHorizontal().x(d=>d.y).y(d=>d.x)({
+      source:{x:a.x, y:a.y},
+      target:{x:b.x, y:b.y}
+    });
+    gDup.append("path").attr("class","dup-link").attr("d",pathD)
         .append("title").text("Inferred duplicate");
   });
 }
 
 /* ------------------ Controls ------------------ */
-function toggle(d){
-  if(d.children){ d._children = d.children; d.children = null; }
-  else if(d._children){ d.children = d._children; d._children = null; }
-}
 document.getElementById("expand").onclick = ()=>{ expandAll(root); update(root); };
 document.getElementById("collapse").onclick= ()=>{
   (root.children||[]).forEach(b => (b.children||[]).forEach(j => collapseAll(j)));
@@ -352,9 +377,9 @@ document.getElementById("collapse").onclick= ()=>{
 document.getElementById("reset").onclick = ()=>{ update(root); };
 document.getElementById("toggle-dup").onchange = ()=> update(root);
 
-/* ------------------ First render + resize ------------------ */
+/* ------------------ First render ------------------ */
 update(root);
-window.addEventListener("resize", ()=>{ [W,H]=availableSize(); update(root); });
+window.addEventListener("resize", ()=> update(root));
 </script>
 </body>
 </html>
